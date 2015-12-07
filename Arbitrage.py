@@ -22,36 +22,37 @@ bitstamp = 'https://www.bitstamp.net/api/ticker/'
 class Exchange:
     'a common class for bitcoin exchanges'
 
-    def __init__(self, name, dataURL, walletURL, apiKey):
+    def __init__(self, name, dataURL, walletURL, apiKey, fee):
         self.name = name
         self.dataURL = dataURL
         self.walletURL = walletURL
         self.apiKey = apiKey
-        self.fees = 0
+        self.fee = fee
         self.price = 0
+
 
 
 #initialize the exchanges
 coinbase = Exchange('Coinbase',
                     'https://api.exchange.coinbase.com/products/BTC-USD/book',
                     0,
-                    0) #account created
+                    0, .0025) #account created
 bitfinex = Exchange('Bitfinex',
                     'https://api.bitfinex.com/v1/pubticker/btcusd',
                     0,
-                    0) #account created
+                    0, .0020) #account created
 btc_e = Exchange('BTC_E',
                  'https://btc-e.com/api/3/ticker/btc_usd',
                  0,
-                 0) #missing account
+                 0, .0020) #missing account
 OKCoin = Exchange('OKCoin',
                   'https://www.okcoin.com/api/ticker.do?symbol=btc_usd&ok=1',
                   0,
-                  0) #missing account
+                  0, .0020) #missing account
 bitstamp = Exchange('Bitstamp',
                     'https://www.bitstamp.net/api/ticker/',
                     0,
-                    0) #missing account
+                    0, .0025) #missing account
 
 
 def getCurrentData():
@@ -126,7 +127,9 @@ def calculateBuyDifference(exchangeData):
     lowest = exchangeData[0]
     global USD
     global BTC
-    BTC = USD/float(lowest.price)
+
+    BTCPreFee = USD/float(lowest.price)
+    BTC = BTCPreFee - (BTCPreFee * lowest.fee)
     USD = 0
     print 'BUY: '+str(BTC)+' @ $'+str(lowest.price)+' on '+lowest.name+'\n'
 
@@ -135,7 +138,8 @@ def calculateSellDifference(exchangeData):
     highest = exchangeData[len(exchangeData)-1]
     global USD
     global BTC
-    USD = float(highest.price) * BTC
+    USDPreFee = float(highest.price) * BTC
+    USD = USDPreFee - (USDPreFee * highest.fee)
     print 'SELL: '+str(BTC)+' @ $'+str(highest.price)+' on '+highest.name+'\n'
     BTC = 0
 
