@@ -8,7 +8,7 @@
 #   test :(
 
 
-import sched, time, requests
+import sched, time, requests, sys
 
 #Define the URLs for each exchange
 coinbase = 'https://api.exchange.coinbase.com/products/BTC-USD/book'
@@ -22,13 +22,14 @@ bitstamp = 'https://www.bitstamp.net/api/ticker/'
 class Exchange:
     'a common class for bitcoin exchanges'
 
-    def __init__(self, name, dataURL, walletURL, apiKey, fee, tradeAccountBalance):
+    def __init__(self, name, dataURL, walletURL, apiKey, fee, tradeAccountUSD):
         self.name = name
         self.dataURL = dataURL
         self.walletURL = walletURL
         self.apiKey = apiKey
         self.fee = fee
-        self.tradeAccountBalance = tradeAccountBalance
+        self.tradeAccountUSD = tradeAccountUSD
+        self.tradeAccountBTC = 0
         self.bid = 0
         self.ask = 0
 
@@ -38,23 +39,23 @@ class Exchange:
 coinbase = Exchange('Coinbase',
                     'https://api.exchange.coinbase.com/products/BTC-USD/book',
                     0,
-                    0, .0025, 100) #account created
+                    0, .0025, 300) #account created
 bitfinex = Exchange('Bitfinex',
                     'https://api.bitfinex.com/v1/pubticker/btcusd',
                     0,
-                    0, .0020, 100) #account created
+                    0, .0020, 300) #account created
 btc_e = Exchange('BTC_E',
                  'https://btc-e.com/api/3/ticker/btc_usd',
                  0,
-                 0, .0020, 100) #missing account
+                 0, .0020, 300) #missing account
 OKCoin = Exchange('OKCoin',
                   'https://www.okcoin.com/api/ticker.do?symbol=btc_usd&ok=1',
                   0,
-                  0, .0020, 100) #missing account
+                  0, .0020, 300) #missing account
 bitstamp = Exchange('Bitstamp',
                     'https://www.bitstamp.net/api/ticker/',
                     0,
-                    0, .0025, 100) #missing account
+                    0, .0025, 300) #missing account
 
 
 def getCurrentData():
@@ -96,64 +97,109 @@ def getCurrentData():
 
     return exchanges
 
+
+
 s = sched.scheduler(time.time, time.sleep)
 
 #globals
 highestToDate = 0
 buySellFlag = 'B'
+exchangeData = getCurrentData()
 
 #Starting Values:
 # US Dollars - 10
 # bitcoin - 0
 # hence buying on the first iteration
-USD = 10
+totalUSD = 10
 BTC = 0
 
 def tick(sc):
     global buySellFlag
     global USD
     global BTC
+    global exchangeData
 
     print("%%%%%%%%%% NEW TICK %%%%%%%%%%")
-    data = getCurrentData()
+    exchangeData = getCurrentData()
 
     #core alternation
     if buySellFlag == 'B':
-        calculateBuyDifference(data)
+        calculateBuyDifference()
         buySellFlag = 'S'
     elif buySellFlag == 'S':
-        calculateSellDifference(data)
+        calculateSellDifference()
         buySellFlag = 'B'
     else:
         print 'buy or sell flag has some how escaped buying or selling, not good'
 
     #Current Stats Output
-    print 'Portfolio -> USD: '+str(USD)+'\t BTC: '+str(BTC)+'\n'
+    print 'Portfolio -> USD: '+str(getTotalUSD())+'\t BTC: '+str(getTotalBTC())+'\n'
 
-    # 60 seconds per tick
+    # 60 seconds per tick (1 minute for testing purposes)
     sc.enter(60, 1, tick, (sc,))
 
-
-def calculateBuyDifference(exchangeData):
-    exchangeData = sorted(exchangeData, key=lambda exchange: exchange.bid)
-    lowest = exchangeData[0]
-    global USD
-    global BTC
-
-    BTCPreFee = USD/float(lowest.bid)
-    BTC = BTCPreFee - (BTCPreFee * lowest.fee)
+def getTotalUSD():
+    global exchangeData
     USD = 0
-    print 'BUY: '+str(BTC)+' @ $'+str(lowest.bid)+' on '+lowest.name+'\n'
+    for exchange in exchangeData:
+        USD += exchange.tradeAccountUSD
 
-def calculateSellDifference(exchangeData):
-    exchangeData = sorted(exchangeData, key=lambda exchange: exchange.ask)
-    highest = exchangeData[len(exchangeData)-1]
-    global USD
-    global BTC
-    USDPreFee = float(highest.ask) * BTC
-    USD = USDPreFee - (USDPreFee * highest.fee)
-    print 'SELL: '+str(BTC)+' @ $'+str(highest.ask)+' on '+highest.name+'\n'
-    BTC = 0
+    return USD
+
+def getTotalBTC():
+    global exchangeData
+    totalBTC = 0
+    for exchange in exchangeData:
+        totalBTC += exchange.tradeAccountBTC
+
+    return totalBTC
+
+
+def calculateBuyDifference():
+    global exchangeData
+    global totalUSD
+    lowest = sorted(exchangeData, key=lambda exchange: exchange.bid)[0]
+    if lowest.tradeAccountUSD < totalUSD:
+        print 'Cant buy on '+lowest.name+ ' USD in trade account too low ('+str(lowest.tradeAccountUSD)+')'
+        sys.exit()
+
+    #This is causing some sort of rounding error
+    # the strange consistency of 1490.0  on buy for a very long time
+    BTCPreFee = totalUSD/float(lowest.bid)
+
+    sorted(exchangeData, key=lambda exchange: exchange.bid)[0].tradeAccountBTC += BTCPreFee - (BTCPreFee * lowest.fee)
+    sorted(exchangeData, key=lambda exchange: exchange.bid)[0].tradeAccountUSD -= totalUSD
+
+    #update array
+
+    print 'BUY: '+str(lowest.tradeAccountBTC)+' @ $'+str(lowest.bid)+' on '+lowest.name+'\n'
+
+
+#note to self: going to have to define a move function that moves the bitcoin
+#               from the buy exchange to the sell exchange
+#               moveBTC(exchangeData):
+def moveBTC(from1, to):
+    global exchangeData
+    for x in range(0,len(exchangeData)):
+        if exchangeData[x].name == from1.name:
+            ex1 = x
+        if exchangeData[x].name == to.name:
+            ex2 = x
+    exchangeData[ex2].tradeAccountBTC = exchangeData[ex1].tradeAccountBTC
+    print 'Moved '+str(from1.tradeAccountBTC)+ " BTC from "+from1.name+" to "+to.name
+    exchangeData[ex1].tradeAccountBTC = 0
+
+def calculateSellDifference():
+    global exchangeData
+    global totalUSD
+    highest = sorted(exchangeData, key=lambda exchange: exchange.ask)[len(exchangeData)-1]
+    BTCLocation = sorted(exchangeData, key=lambda exchange: exchange.tradeAccountBTC)[len(exchangeData)-1]
+    moveBTC(BTCLocation, highest)
+    USDPreFee = float(highest.ask) * highest.tradeAccountBTC
+    sorted(exchangeData, key=lambda exchange: exchange.ask)[len(exchangeData)-1].tradeAccountUSD += USDPreFee - (USDPreFee * highest.fee)
+    totalUSD = USDPreFee - (USDPreFee * highest.fee)
+    print 'SELL: '+str(highest.tradeAccountBTC)+' @ $'+str(highest.ask)+' on '+highest.name+'\n'
+    sorted(exchangeData, key=lambda exchange: exchange.ask)[len(exchangeData)-1].tradeAccountBTC = 0
 
 def getTotalPortfolio(exchangeData):
     #TODO: aggregate across all of the trade accounts
